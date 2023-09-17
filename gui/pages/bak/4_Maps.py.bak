@@ -1,0 +1,63 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import xml.etree.ElementTree as ET
+import pandas as pd
+
+# Ścieżka do pliku GPX
+gpx_file_path = 'twoj_plik.gpx'
+
+# Parsowanie pliku GPX
+tree = ET.parse(gpx_file_path)
+root = tree.getroot()
+
+# Inicjalizacja pustych list na dane
+lon_list, lat_list, ele_list, time_list = [], [], [], []
+def parse_route(file_link):
+# Iteracja przez trkpt elementy w trkseg
+for trkpt in root.findall(".//{http://www.topografix.com/GPX/1/1}trkpt"):
+    lon = float(trkpt.get('lon'))
+    lat = float(trkpt.get('lat'))
+    ele = float(trkpt.find('{http://www.topografix.com/GPX/1/1}ele').text)
+    time = trkpt.find('{http://www.topografix.com/GPX/1/1}time').text
+    
+    lon_list.append(lon)
+    lat_list.append(lat)
+    ele_list.append(ele)
+    time_list.append(time)
+
+# Tworzenie DataFrame
+df = pd.DataFrame({'lon': lon_list, 'lat': lat_list, 'ele': ele_list, 'time': time_list})
+
+st.title('Uber pickups in NYC')
+
+DATE_COLUMN = 'date/time'
+DATA_URL = ('https://s3-us-west-2.amazonaws.com/'
+            'streamlit-demo-data/uber-raw-data-sep14.csv.gz')
+
+@st.cache_data
+def load_data(nrows):
+    data = pd.read_csv(DATA_URL, nrows=nrows)
+    lowercase = lambda x: str(x).lower()
+    data.rename(lowercase, axis='columns', inplace=True)
+    data[DATE_COLUMN] = pd.to_datetime(data[DATE_COLUMN])
+    return data
+
+data_load_state = st.text('Loading data...')
+data = load_data(10000)
+data_load_state.text("Done! (using st.cache_data)")
+
+if st.checkbox('Show raw data'):
+    st.subheader('Raw data')
+    st.write(data)
+
+st.subheader('Number of pickups by hour')
+hist_values = np.histogram(data[DATE_COLUMN].dt.hour, bins=24, range=(0,24))[0]
+st.bar_chart(hist_values)
+
+# Some number in the range 0-23
+hour_to_filter = st.slider('hour', 0, 23, 17)
+filtered_data = data[data[DATE_COLUMN].dt.hour == hour_to_filter]
+
+st.subheader('Map of all pickups at %s:00' % hour_to_filter)
+st.map(filtered_data)

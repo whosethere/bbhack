@@ -1,0 +1,19 @@
+import streamlit as st
+import pandas as pd
+
+
+
+
+st.set_page_config(
+    page_title="Strona główna",
+    page_icon="👋",
+)
+
+st.write("# Witaj na BBEnduro! 👋")
+
+st.write("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec euismod, nisl eget aliquam ultricies, nunc nisl aliquet nunc, vitae aliquam nisl ni")
+
+
+st.write("Dostępne trasy: 👋")
+# TODO zczytywanie z online
+

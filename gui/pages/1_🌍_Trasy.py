@@ -1,0 +1,320 @@
+import streamlit as st
+import pandas as pd
+import xml.etree.ElementTree as ET
+import pandas as pd
+import requests
+import pydeck as pdk
+from io import StringIO
+import plotly.graph_objects as go
+import plotly.express as px
+
+
+st.set_page_config(layout="wide")
+def parse_gpx_to_dataframe(gpx_url):
+    # Pobierz zawartość pliku GPX z URL
+    response = requests.get(gpx_url)
+
+    if response.status_code == 200:
+        # Parsowanie zawartości pliku GPX
+        root = ET.fromstring(response.content)
+        
+        # Inicjalizacja pustych list na dane
+        lon_list, lat_list, ele_list, time_list = [], [], [], []
+
+        # Iteracja przez trkpt elementy w trkseg
+        for trkpt in root.findall(".//{http://www.topografix.com/GPX/1/1}trkpt"):
+            lon = float(trkpt.get('lon'))
+            lat = float(trkpt.get('lat'))
+            ele = float(trkpt.find('{http://www.topografix.com/GPX/1/1}ele').text)
+            time = trkpt.find('{http://www.topografix.com/GPX/1/1}time').text
+
+            lon_list.append(lon)
+            lat_list.append(lat)
+            ele_list.append(ele)
+            time_list.append(time)
+
+        # Tworzenie DataFrame
+        df = pd.DataFrame({'lon': lon_list, 'lat': lat_list, 'ele': ele_list, 'time': time_list})
+
+        return df
+    else:
+        print("Nie można pobrać pliku GPX z URL.")
+        return None
+
+
+def get_trail_path(df, trail_difficulty):
+    data = df
+    path_color = [0, 0, 0]
+    if trail_difficulty == 'blue':
+        path_color = [0, 0, 255]
+    if trail_difficulty == 'red':
+        path_color = [255, 0, 0]
+    if trail_difficulty == 'black':
+        path_color = [0, 0, 0]
+    
+    path_data = [{
+        "path": list(zip(data['lon'], data['lat'])),
+        "name": "Trasa przejazdu"
+    }]
+    view_state = pdk.ViewState(
+    latitude=data['lat'].mean(),
+    longitude=data['lon'].mean(),
+    zoom=14,
+    pitch=50
+    )
+
+    layer = pdk.Layer(
+        'PathLayer',
+        path_data,
+        get_path='path',
+        get_width=5,
+        get_color=path_color,
+        width_scale=20,
+        width_min_pixels=2,
+        width_max_pixels=5
+    )
+
+    # Ustawienie jasnego tła mapy
+    r = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        map_style="light"
+    )
+
+    return r
+
+def route_twister():
+    import streamlit as st
+    import time
+    import numpy as np
+    # Przykład użycia funkcji:
+    
+    st.markdown(f'# {list(page_names_to_funcs.keys())[0]}')
+    gpx_url = 'https://endurotrails.pl/static/upload/store/pliki_gpx/twister.gpx'  # Zmień na właściwy URL
+    
+    left_column, right_column = st.columns(2)
+    data = parse_gpx_to_dataframe(gpx_url)
+
+    with left_column:
+        r = get_trail_path(data, trail_difficulty='blue')
+        st.pydeck_chart(r)
+    with right_column:
+        st.markdown(
+            """
+            ### Opis trasy
+             Ścieżka posiada sporo naturalnych i sztucznych elementów, np. słynna sekcja korzenim muldy, bandy i niewielkie hopki. Zaczyna się niedaleko schroniska, przy starym torze saneczkowym, a kończy przy centrum ścieżek. Trasa ta jest bardzo szybka (!), wymaga sporego asortymentu umiejętności i dużej kontroli roweru.
+
+            W części górnej ścieżka była wcześniej zielonym szlakiem pieszym (stąd nazwa), cenionym bardzo przez bielskie środowisko MTB. Obecnie szlak pieszy przeniesiono parę metrów niżej do zabytkowego toru saneczkowego."""
+        )
+        twister = {
+        'Nazwa': 'Twister',
+        'Trudność': 'Trasa niebieska - dla średnio-zaawansowanych kolarzy górskich',
+        'Widoczność': 'Trasa zawsze dobrze widoczna',
+        'Długość[m]': 4400,
+        'Podjazd[m]': 95,
+        'Trudność podjazdu': 'Łatwy',
+        'Spadek[m]': 270,
+        # 'avg_duration': 0,
+        
+        # 'average_slope': 0,
+        
+        # 'description': 'Niezbyt stroma, ale bardzo zakręcona ścieżka. Zaczyna sięna wschodnim zboczu, nieopodal szczytu Koziej Góry. Dojazd na start z Błoni potrwa około 45 minut. Poradzi sobie na niej prawie każdy kolarz górski, trzeba jednak uważać na spore bandy i muldy. Należy też liczyć się z jej długością!',
+        # 'file_name': 'twister.gpx',
+        }
+        df = pd.DataFrame.from_dict(twister, orient='index', columns=['Szczegółowe dane trasy'])
+        st.dataframe(df,width=600, height=280)
+
+    st.markdown("""---""")
+    st.title('Dodatkowe informacje o trasie')
+    # enhence data with api call
+    
+    get_enhanced_df = requests.post('http://localhost:5000/get_enhanced_df', json=data.to_json(orient='split'))
+    data = pd.read_json(get_enhanced_df.text, orient='split')
+    # st.dataframe(data)
+
+    tab1, tab2 = st.tabs(["Wizualizacja trasy 3D", "Spadek trasy"])
+    with tab1:
+    # Use the Streamlit theme.
+    # This is the default. So you can also omit the theme argument.
+        get_plot_3d = requests.post('http://localhost:5000/get_3d_plot', json=data.to_json(orient='split'))
+        plot_3d = get_plot_3d.json()
+        st.subheader('Wizualizacja trasy w 3D')
+        fig = go.Figure(plot_3d)
+        st.plotly_chart(fig)
+    with tab2:
+        enhanced_data = data
+        fig_gradient = px.scatter_mapbox(enhanced_data, lat='lat', lon='lon', color='gradients',
+                                        size=abs(enhanced_data['gradients']), hover_data=['ele', 'time', 'speeds'],
+                                        color_continuous_scale=px.colors.sequential.RdBu_r, 
+                                        size_max=10, zoom=14,
+                                        labels={"gradients": "Nachylenie (%)", "ele": "Wysokość (m n.p.m.)", "time": "Czas", "speeds": "Prędkość (km/h)"},
+                                        title="Mapa trasy z uwzględnieniem nachylenia")
+
+        fig_gradient.update_layout(mapbox_style="open-street-map")
+        st.plotly_chart(fig_gradient)
+
+    # Use the native Plotly theme.
+        # st.plotly_chart(fig, theme=None, use_container_width=True)
+
+
+
+
+    st.title('Dodaj przejazd')
+    uploaded_file = st.file_uploader("Wybierz plik")
+    if uploaded_file is not None:
+        # To read file as bytes:
+        bytes_data = uploaded_file.getvalue()
+        # st.write(bytes_data)
+
+        # To convert to a string based IO:
+        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+        # st.write(stringio)
+
+        # To read file as string:
+        string_data = stringio.read()
+    
+    st.title('Twoje przejazdy na trasie Twister')
+    # TODO connect to mongo, check if user has any rides on this route
+    def mongoconnect():
+        pass
+    st.write('Brak przejazdów na tej trasie')
+    # TODO display rides on this route
+    # TODO convert file to dataframe and input user route to db
+    # TODO zgłoś przejazd
+
+        
+    
+
+def stary_zielony():
+    import streamlit as st
+    import time
+    import numpy as np
+    import pydeck as pdk
+    # Przykład użycia funkcji:
+    st.markdown(f'# {list(page_names_to_funcs.keys())[1]}')
+    gpx_url = 'https://endurotrails.pl/static/upload/store/pliki_gpx/stary-zielony.gpx'  # Zmień na właściwy URL
+    data = parse_gpx_to_dataframe(gpx_url)
+    # st.write(data)
+
+
+    # Wizualizacja trasy na mapie
+    # st.title("Stary Zielony")
+    r = get_trail_path(data, trail_difficulty='red')
+    st.pydeck_chart(r)
+
+    
+def dh_plus():
+    import streamlit as st
+    import time
+    import numpy as np
+    import pydeck as pdk
+
+
+    st.markdown(f'# {list(page_names_to_funcs.keys())[2]}')
+    gpx_url = 'https://endurotrails.pl/static/upload/store/pliki_gpx/DH.gpx'  # Zmień na właściwy URL
+    left_column, right_column = st.columns(2)
+    data = parse_gpx_to_dataframe(gpx_url)
+
+    with left_column:
+        r = get_trail_path(data, trail_difficulty='black')
+        st.pydeck_chart(r)
+    with right_column:
+        st.markdown(
+            """
+            ### Opis trasy
+             
+            **Stroma, kamienista i bardzo szybka trasa** ze sporą ilośćią nierówności i sztucznych elementów (np. hopki). Zaczyna się na wschodnim zboczu, nieopodal szczytu Koziej Góry. Dojazd od centrum ścieżek na start potrwa około 45 minut. Ścieżka kończy się obok stawu przy ul. Modrej. Trasa wymaga świetnej kontroli roweru przy dużych prędkościach oraz wielu zjazdowych umiejętności na najwyższym poziomie. 
+
+            Środkowa część trasy to jedna z pierwszych "prawie-legalnych" tras zjazdowych na Koziej Górze, tworzona i poprawiona przez parę pokoleń bielskich downhillowców.
+            """
+        )
+        twister = {
+        'Nazwa': 'dh+',
+        'Trudność': 'Kolor czarny - dla ekspertów w kolarstiwe górskim',
+        'Długość[m]': 2000,
+        'Podjazd[m]': 0,
+        'Spadek[m]': 271,
+        # 'avg_duration': 0,
+        
+        # 'average_slope': 0,
+        
+        # 'description': 'Niezbyt stroma, ale bardzo zakręcona ścieżka. Zaczyna sięna wschodnim zboczu, nieopodal szczytu Koziej Góry. Dojazd na start z Błoni potrwa około 45 minut. Poradzi sobie na niej prawie każdy kolarz górski, trzeba jednak uważać na spore bandy i muldy. Należy też liczyć się z jej długością!',
+        # 'file_name': 'twister.gpx',
+        }
+        df = pd.DataFrame.from_dict(twister, orient='index', columns=['Szczegółowe dane trasy'])
+        st.dataframe(df,width=600, height=210)
+
+    st.markdown("""---""")
+    get_enhanced_df = requests.post('http://localhost:5000/get_enhanced_df', json=data.to_json(orient='split'))
+    data = pd.read_json(get_enhanced_df.text, orient='split')
+    # st.dataframe(data)
+
+    tab1, tab2 = st.tabs(["Wizualizacja trasy 3D", "Spadek trasy"])
+    with tab1:
+    # Use the Streamlit theme.
+    # This is the default. So you can also omit the theme argument.
+        get_plot_3d = requests.post('http://localhost:5000/get_3d_plot', json=data.to_json(orient='split'))
+        plot_3d = get_plot_3d.json()
+        st.subheader('Wizualizacja trasy w 3D')
+        fig = go.Figure(plot_3d)
+        st.plotly_chart(fig)
+    with tab2:
+        enhanced_data = data
+        fig_gradient = px.scatter_mapbox(enhanced_data, lat='lat', lon='lon', color='gradients',
+                                        size=abs(enhanced_data['gradients']), hover_data=['ele', 'time', 'speeds'],
+                                        color_continuous_scale=px.colors.sequential.RdBu_r, 
+                                        size_max=10, zoom=14,
+                                        labels={"gradients": "Nachylenie (%)", "ele": "Wysokość (m n.p.m.)", "time": "Czas", "speeds": "Prędkość (km/h)"},
+                                        title="Mapa trasy z uwzględnieniem nachylenia")
+
+        fig_gradient.update_layout(mapbox_style="open-street-map")
+        st.plotly_chart(fig_gradient)
+
+    st.title('Dodaj przejazd')
+    uploaded_file = st.file_uploader("Wybierz plik")
+    if uploaded_file is not None:
+        # To read file as bytes:
+        bytes_data = uploaded_file.getvalue()
+        # st.write(bytes_data)
+
+        # To convert to a string based IO:
+        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+        # st.write(stringio)
+
+        # To read file as string:
+        string_data = stringio.read()
+    
+    st.title('Twoje przejazdy na trasie Twister')
+    # TODO connect to mongo, check if user has any rides on this route
+    def mongoconnect():
+        pass
+    st.write('Brak przejazdów na tej trasie')
+    # TODO display rides on this route
+    # TODO convert file to dataframe and input user route to db
+    # TODO zgłoś przejazd
+
+
+
+page_names_to_funcs = {
+    "Twister": route_twister,
+    "Stary-zielony": stary_zielony,
+    "DH+": dh_plus,
+    # "Mapping Demo": mapping_demo,
+    # "DataFrame Demo": data_frame_demo
+}
+
+
+demo_name = st.sidebar.selectbox("Wybierz trasę", page_names_to_funcs.keys())
+page_names_to_funcs[demo_name]()
+
+
+
+
+
+
+
+
+
+
+
+
